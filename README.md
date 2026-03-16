@@ -1,5 +1,9 @@
 # go-sseutil
 
+[![CI](https://github.com/philiprehberger/go-sseutil/actions/workflows/ci.yml/badge.svg)](https://github.com/philiprehberger/go-sseutil/actions/workflows/ci.yml)
+[![Go Reference](https://pkg.go.dev/badge/github.com/philiprehberger/go-sseutil.svg)](https://pkg.go.dev/github.com/philiprehberger/go-sseutil)
+[![License](https://img.shields.io/github/license/philiprehberger/go-sseutil)](LICENSE)
+
 Server-Sent Events (SSE) utilities for Go. Server broker and client, zero dependencies.
 
 ## Installation

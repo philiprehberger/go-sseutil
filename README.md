@@ -108,6 +108,13 @@ fmt.Print(event.String())
 | `Stream.Close()` | Close the connection |
 | `Stream.LastEventID()` | Last received event ID |
 
+## Development
+
+```bash
+go test ./...
+go vet ./...
+```
+
 ## License
 
 MIT

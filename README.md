@@ -69,6 +69,44 @@ func main() {
 }
 ```
 
+### JSON Events
+
+```go
+// Send JSON to a specific client.
+type Message struct {
+	Text string `json:"text"`
+	From string `json:"from"`
+}
+
+err := broker.SendJSON("client-1", "chat", Message{Text: "hi", From: "alice"})
+// Sends: event: chat\ndata: {"text":"hi","from":"alice"}\n\n
+
+// Broadcast JSON to all clients.
+err = broker.BroadcastJSON("update", map[string]any{"status": "ok"})
+```
+
+### Topics
+
+```go
+// Subscribe a client to topics.
+broker.Subscribe("client-1", "sports", "news")
+
+// Publish to a topic — only subscribed clients receive the event.
+broker.PublishTopic("sports", sseutil.Event{Event: "score", Data: "3-2"})
+```
+
+### Lifecycle Hooks
+
+```go
+broker.OnConnect(func(clientID string) {
+	log.Printf("client connected: %s", clientID)
+})
+
+broker.OnDisconnect(func(clientID string) {
+	log.Printf("client disconnected: %s", clientID)
+})
+```
+
 ### Event Builder
 
 ```go
@@ -100,6 +138,12 @@ fmt.Print(event.String())
 | `Broker.Handler()` | HTTP handler for SSE endpoint |
 | `Broker.Broadcast(e)` | Send event to all clients |
 | `Broker.Send(id, e)` | Send event to a specific client |
+| `Broker.SendJSON(id, event, data)` | Marshal data to JSON and send to a client |
+| `Broker.BroadcastJSON(event, data)` | Marshal data to JSON and broadcast to all |
+| `Broker.Subscribe(id, topics...)` | Subscribe a client to named topics |
+| `Broker.PublishTopic(topic, e)` | Send event to all clients subscribed to topic |
+| `Broker.OnConnect(fn)` | Set callback for client connections |
+| `Broker.OnDisconnect(fn)` | Set callback for client disconnections |
 | `Broker.ClientCount()` | Number of connected clients |
 | `Connect(ctx, url)` | Connect to an SSE endpoint |
 | `Stream.Events()` | Channel of received events |

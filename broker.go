@@ -1,6 +1,7 @@
 package sseutil
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"sync"
@@ -18,10 +19,13 @@ type sseClient struct {
 // broadcasting events to all connected clients, sending events to
 // specific clients, and automatic keep-alive pings.
 type Broker struct {
-	mu        sync.RWMutex
-	clients   map[string]*sseClient
-	nextID    atomic.Uint64
-	keepAlive time.Duration
+	mu           sync.RWMutex
+	clients      map[string]*sseClient
+	topics       map[string]map[string]struct{} // topic -> set of client IDs
+	nextID       atomic.Uint64
+	keepAlive    time.Duration
+	onConnect    func(string)
+	onDisconnect func(string)
 }
 
 // BrokerOption configures a Broker.
@@ -39,6 +43,7 @@ func WithKeepAlive(d time.Duration) BrokerOption {
 func NewBroker(opts ...BrokerOption) *Broker {
 	b := &Broker{
 		clients:   make(map[string]*sseClient),
+		topics:    make(map[string]map[string]struct{}),
 		keepAlive: 30 * time.Second,
 	}
 	for _, opt := range opts {
@@ -73,12 +78,28 @@ func (b *Broker) Handler() http.Handler {
 
 		b.mu.Lock()
 		b.clients[id] = client
+		onConn := b.onConnect
 		b.mu.Unlock()
+
+		if onConn != nil {
+			onConn(id)
+		}
 
 		defer func() {
 			b.mu.Lock()
 			delete(b.clients, id)
+			for topic, subs := range b.topics {
+				delete(subs, id)
+				if len(subs) == 0 {
+					delete(b.topics, topic)
+				}
+			}
+			onDisc := b.onDisconnect
 			b.mu.Unlock()
+
+			if onDisc != nil {
+				onDisc(id)
+			}
 		}()
 
 		// Set up keep-alive ticker if enabled.
@@ -150,4 +171,84 @@ func (b *Broker) ClientCount() int {
 	b.mu.RLock()
 	defer b.mu.RUnlock()
 	return len(b.clients)
+}
+
+// SendJSON marshals data to JSON and sends it as an SSE event to the
+// specified client. It returns an error if JSON marshaling fails, or if
+// the client was not found.
+func (b *Broker) SendJSON(clientID string, event string, data any) error {
+	raw, err := json.Marshal(data)
+	if err != nil {
+		return fmt.Errorf("sseutil: marshal json: %w", err)
+	}
+	ok := b.Send(clientID, Event{Event: event, Data: string(raw)})
+	if !ok {
+		return fmt.Errorf("sseutil: client %s not found or buffer full", clientID)
+	}
+	return nil
+}
+
+// BroadcastJSON marshals data to JSON and broadcasts it as an SSE event
+// to all connected clients. It returns an error if JSON marshaling fails.
+func (b *Broker) BroadcastJSON(event string, data any) error {
+	raw, err := json.Marshal(data)
+	if err != nil {
+		return fmt.Errorf("sseutil: marshal json: %w", err)
+	}
+	b.Broadcast(Event{Event: event, Data: string(raw)})
+	return nil
+}
+
+// Subscribe adds the given client to the specified topics. If the client
+// is not connected, the subscription is still recorded and will take
+// effect if the client connects with the same ID.
+func (b *Broker) Subscribe(clientID string, topics ...string) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	for _, topic := range topics {
+		subs, ok := b.topics[topic]
+		if !ok {
+			subs = make(map[string]struct{})
+			b.topics[topic] = subs
+		}
+		subs[clientID] = struct{}{}
+	}
+}
+
+// PublishTopic sends an event to all clients subscribed to the given topic.
+// Events are dropped for clients whose send buffers are full.
+func (b *Broker) PublishTopic(topic string, event Event) {
+	data := event.Bytes()
+	b.mu.RLock()
+	defer b.mu.RUnlock()
+	subs, ok := b.topics[topic]
+	if !ok {
+		return
+	}
+	for clientID := range subs {
+		client, exists := b.clients[clientID]
+		if !exists {
+			continue
+		}
+		select {
+		case client.events <- data:
+		default:
+		}
+	}
+}
+
+// OnConnect sets a callback function that is invoked when a new client
+// connects. The callback receives the client ID.
+func (b *Broker) OnConnect(fn func(clientID string)) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.onConnect = fn
+}
+
+// OnDisconnect sets a callback function that is invoked when a client
+// disconnects. The callback receives the client ID.
+func (b *Broker) OnDisconnect(fn func(clientID string)) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	b.onDisconnect = fn
 }
